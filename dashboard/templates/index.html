@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bank IT Operations &mdash; Monitoring Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ===================================================================
+   RESET & BASE
+=================================================================== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:         #0b1120;
+  --surface:    #111827;
+  --card:       #1a2236;
+  --card-hover: #1f2b3e;
+  --border:     #1e2d45;
+  --border2:    #243450;
+  --text:       #e2e8f0;
+  --text-muted: #64748b;
+  --text-dim:   #94a3b8;
+
+  --green:   #22c55e;
+  --yellow:  #eab308;
+  --orange:  #f97316;
+  --red:     #ef4444;
+  --blue:    #3b82f6;
+  --indigo:  #6366f1;
+  --cyan:    #06b6d4;
+  --purple:  #a855f7;
+
+  --green-bg:  rgba(34,197,94,.12);
+  --yellow-bg: rgba(234,179,8,.12);
+  --orange-bg: rgba(249,115,22,.12);
+  --red-bg:    rgba(239,68,68,.12);
+  --blue-bg:   rgba(59,130,246,.12);
+  --cyan-bg:   rgba(6,182,212,.12);
+
+  --radius: 8px;
+  --transition: .2s ease;
+}
+html { font-size: 14px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+a { color: var(--cyan); text-decoration: none; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ===================================================================
+   LAYOUT
+=================================================================== */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; height: 56px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+}
+.topbar-left   { display: flex; align-items: center; gap: 14px; }
+.topbar-right  { display: flex; align-items: center; gap: 16px; }
+.logo { display: flex; align-items: center; gap: 8px; }
+.logo-icon { width: 30px; height: 30px; }
+.logo-text { font-size: 1rem; font-weight: 700; letter-spacing: .5px; }
+.logo-sub  { font-size: .72rem; color: var(--text-muted); letter-spacing: .3px; }
+
+#overall-badge {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 20px; font-size: .78rem; font-weight: 700;
+  letter-spacing: .6px; text-transform: uppercase; transition: var(--transition);
+}
+#overall-badge.critical { background: var(--red-bg);    color: var(--red);    border: 1px solid rgba(239,68,68,.3); }
+#overall-badge.high     { background: var(--orange-bg); color: var(--orange); border: 1px solid rgba(249,115,22,.3); }
+#overall-badge.warning  { background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(234,179,8,.3); }
+#overall-badge.healthy  { background: var(--green-bg);  color: var(--green);  border: 1px solid rgba(34,197,94,.3); }
+
+.pulse { width:8px; height:8px; border-radius: 50%; animation: pulse 1.6s ease-in-out infinite; }
+.pulse.red    { background: var(--red); }
+.pulse.green  { background: var(--green); }
+.pulse.yellow { background: var(--yellow); }
+.pulse.orange { background: var(--orange); }
+@keyframes pulse {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:.5; transform:scale(.7); }
+}
+
+#refresh-countdown {
+  font-size: .75rem; color: var(--text-muted);
+  display: flex; align-items: center; gap: 6px;
+}
+#countdown-bar {
+  width: 80px; height: 3px; background: var(--border);
+  border-radius: 2px; overflow: hidden;
+}
+#countdown-fill {
+  height: 100%; background: var(--cyan);
+  transition: width .1s linear; border-radius: 2px;
+}
+.refresh-btn {
+  background: var(--card); border: 1px solid var(--border2); color: var(--text-dim);
+  padding: 5px 12px; border-radius: var(--radius); font-size: .75rem; cursor: pointer;
+  transition: var(--transition);
+}
+.refresh-btn:hover { background: var(--card-hover); color: var(--text); }
+
+.page { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+
+/* ===================================================================
+   AGENT SUMMARY ROW
+=================================================================== */
+.agent-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.agent-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+  transition: var(--transition);
+}
+.agent-card:hover { border-color: var(--border2); background: var(--card-hover); }
+.agent-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.agent-name { font-size: .85rem; font-weight: 700; letter-spacing: .3px; }
+.agent-name.dynatrace { color: var(--cyan); }
+.agent-name.azure     { color: #5a9fd4; }
+.agent-name.kibana    { color: var(--purple); }
+.agent-status { display: flex; align-items: center; gap: 5px; font-size: .7rem; color: var(--green); }
+.agent-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.agent-metric { background: rgba(255,255,255,.03); border-radius: 6px; padding: 8px 10px; }
+.agent-metric-label { font-size: .68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 3px; }
+.agent-metric-val { font-size: 1.1rem; font-weight: 700; }
+.agent-metric-val.bad  { color: var(--red); }
+.agent-metric-val.warn { color: var(--yellow); }
+.agent-metric-val.ok   { color: var(--green); }
+
+/* ===================================================================
+   STATS BAR
+=================================================================== */
+.stats-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.stat-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+.stat-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+.stat-icon.red    { background: var(--red-bg); }
+.stat-icon.orange { background: var(--orange-bg); }
+.stat-icon.yellow { background: var(--yellow-bg); }
+.stat-icon.green  { background: var(--green-bg); }
+.stat-icon.blue   { background: var(--blue-bg); }
+.stat-label { font-size: .7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; }
+.stat-val   { font-size: 1.5rem; font-weight: 800; line-height: 1.2; }
+.stat-val.red    { color: var(--red); }
+.stat-val.orange { color: var(--orange); }
+.stat-val.yellow { color: var(--yellow); }
+.stat-val.green  { color: var(--green); }
+.stat-val.blue   { color: var(--blue); }
+
+/* ===================================================================
+   SECTION TITLES
+=================================================================== */
+.section-title {
+  font-size: .7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-muted); margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* ===================================================================
+   SERVICE HEALTH GRID
+=================================================================== */
+.service-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.svc-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px;
+  border-left: 3px solid transparent;
+  transition: var(--transition); cursor: default;
+}
+.svc-card:hover { background: var(--card-hover); }
+.svc-card.critical { border-left-color: var(--red); }
+.svc-card.high     { border-left-color: var(--orange); }
+.svc-card.warning  { border-left-color: var(--yellow); }
+.svc-card.healthy  { border-left-color: var(--green); }
+
+.svc-name { font-size: .8rem; font-weight: 600; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.svc-row  { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+.svc-lbl  { font-size: .67rem; color: var(--text-muted); }
+.svc-val  { font-size: .75rem; font-weight: 600; }
+.svc-val.bad  { color: var(--red); }
+.svc-val.warn { color: var(--yellow); }
+.svc-val.ok   { color: var(--green); }
+
+.svc-badge {
+  display: inline-block; font-size: .62rem; font-weight: 700; padding: 1px 7px;
+  border-radius: 10px; text-transform: uppercase; letter-spacing: .4px; margin-top: 6px;
+}
+.svc-badge.critical { background: var(--red-bg);    color: var(--red); }
+.svc-badge.high     { background: var(--orange-bg); color: var(--orange); }
+.svc-badge.warning  { background: var(--yellow-bg); color: var(--yellow); }
+.svc-badge.healthy  { background: var(--green-bg);  color: var(--green); }
+
+/* ===================================================================
+   MAIN CONTENT AREA (charts + alerts side by side)
+=================================================================== */
+.main-row { display: grid; grid-template-columns: 1fr 380px; gap: 16px; }
+
+/* Charts column */
+.charts-col { display: flex; flex-direction: column; gap: 16px; }
+.chart-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+}
+.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.chart-title  { font-size: .82rem; font-weight: 700; }
+.chart-sub    { font-size: .68rem; color: var(--text-muted); }
+.chart-wrap   { position: relative; }
+.charts-pair  { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+/* Alerts column */
+.alerts-col { display: flex; flex-direction: column; gap: 16px; }
+.alerts-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; flex: 1; overflow: hidden;
+}
+.alerts-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.alerts-title  { font-size: .82rem; font-weight: 700; }
+.badge-counts  { display: flex; gap: 6px; }
+.bc { font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+.bc.crit { background: var(--red-bg);    color: var(--red); }
+.bc.high { background: var(--orange-bg); color: var(--orange); }
+.bc.warn { background: var(--yellow-bg); color: var(--yellow); }
+
+.alert-list { display: flex; flex-direction: column; gap: 6px; max-height: 440px; overflow-y: auto; }
+.alert-item {
+  background: rgba(255,255,255,.025); border-radius: 6px; padding: 9px 11px;
+  border-left: 3px solid transparent; transition: var(--transition);
+}
+.alert-item:hover { background: rgba(255,255,255,.04); }
+.alert-item.critical { border-left-color: var(--red); }
+.alert-item.high     { border-left-color: var(--orange); }
+.alert-item.warning  { border-left-color: var(--yellow); }
+.alert-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 3px; }
+.alert-title-text { font-size: .75rem; font-weight: 600; line-height: 1.3; }
+.alert-age { font-size: .65rem; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+.alert-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.alert-source { font-size: .64rem; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+.alert-source.Dynatrace { background: var(--cyan-bg);               color: var(--cyan); }
+.alert-source.Azure     { background: rgba(90,159,212,.12);         color: #5a9fd4; }
+.alert-source.Kibana    { background: rgba(168,85,247,.12);         color: var(--purple); }
+.alert-category { font-size: .64rem; color: var(--text-muted); }
+.corr-badge { font-size: .62rem; color: var(--cyan); background: var(--cyan-bg); padding: 1px 5px; border-radius: 4px; }
+
+/* ===================================================================
+   SLO TABLE
+=================================================================== */
+.slo-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+}
+.slo-table { width: 100%; border-collapse: collapse; }
+.slo-table th {
+  text-align: left; font-size: .65rem; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-muted); padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+.slo-table td { padding: 8px 10px; font-size: .75rem; border-bottom: 1px solid rgba(255,255,255,.04); }
+.slo-table tr:last-child td { border-bottom: none; }
+.slo-table tr:hover td { background: rgba(255,255,255,.02); }
+.slo-bar-wrap { width: 80px; background: var(--border); border-radius: 3px; height: 5px; overflow: hidden; display: inline-block; }
+.slo-bar { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.status-pill { display: inline-block; font-size: .65rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; }
+.status-pill.ok       { background: var(--green-bg);  color: var(--green); }
+.status-pill.warning  { background: var(--yellow-bg); color: var(--yellow); }
+.status-pill.violated { background: var(--red-bg);    color: var(--red); }
+
+/* ===================================================================
+   ORCHESTRATOR PANEL
+=================================================================== */
+.orc-panel {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px;
+}
+.orc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.orc-title  { font-size: .95rem; font-weight: 800; }
+.escalation-badge {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,.3);
+  padding: 5px 14px; border-radius: 20px; font-size: .75rem; font-weight: 700;
+  animation: glow 2s ease-in-out infinite;
+}
+@keyframes glow {
+  0%,100% { box-shadow: 0 0 0 rgba(239,68,68,0); }
+  50%      { box-shadow: 0 0 12px rgba(239,68,68,.35); }
+}
+.incidents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.inc-card {
+  border: 1px solid var(--border); border-radius: 7px; padding: 12px;
+  border-top: 2px solid transparent; transition: var(--transition);
+}
+.inc-card:hover { background: var(--card-hover); }
+.inc-card.critical { border-top-color: var(--red); }
+.inc-card.high     { border-top-color: var(--orange); }
+.inc-card.medium   { border-top-color: var(--yellow); }
+.inc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.inc-id    { font-size: .68rem; color: var(--text-muted); font-weight: 700; font-family: monospace; }
+.sev-chip  { font-size: .62rem; font-weight: 700; padding: 1px 7px; border-radius: 8px; text-transform: uppercase; }
+.sev-chip.critical { background: var(--red-bg);    color: var(--red); }
+.sev-chip.high     { background: var(--orange-bg); color: var(--orange); }
+.sev-chip.medium   { background: var(--yellow-bg); color: var(--yellow); }
+.inc-title  { font-size: .78rem; font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
+.inc-cause  { font-size: .69rem; color: var(--text-dim); margin-bottom: 5px; line-height: 1.4; }
+.inc-impact { font-size: .68rem; color: var(--text-muted); margin-bottom: 6px; }
+.inc-footer { display: flex; justify-content: space-between; align-items: center; }
+.inc-owner  { font-size: .65rem; color: var(--cyan); }
+.inc-sources { display: flex; gap: 3px; }
+.inc-src-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+.actions-table { width: 100%; border-collapse: collapse; }
+.actions-table th { text-align: left; font-size: .65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.actions-table td { padding: 7px 8px; font-size: .74rem; border-bottom: 1px solid rgba(255,255,255,.03); }
+.actions-table tr:last-child td { border-bottom: none; }
+.urgency { display: inline-block; font-size: .64rem; font-weight: 700; padding: 2px 8px; border-radius: 8px; font-family: monospace; }
+.urgency.NOW    { background: var(--red-bg);    color: var(--red); }
+.urgency.min15  { background: var(--orange-bg); color: var(--orange); }
+.urgency.h1     { background: var(--yellow-bg); color: var(--yellow); }
+.urgency.h4     { background: var(--blue-bg);   color: var(--blue); }
+
+/* ===================================================================
+   INFRA HEATMAP
+=================================================================== */
+.infra-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.host-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px;
+}
+.host-name   { font-size: .72rem; font-weight: 700; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metric-bar-row { margin-bottom: 5px; }
+.metric-bar-label { display: flex; justify-content: space-between; font-size: .65rem; margin-bottom: 2px; }
+.metric-bar-label span:first-child { color: var(--text-muted); }
+.bar-track { background: var(--border); border-radius: 3px; height: 5px; overflow: hidden; }
+.bar-fill   { height: 100%; border-radius: 3px; transition: width .6s ease; }
+
+/* ===================================================================
+   FOOTER
+=================================================================== */
+.footer {
+  text-align: center; padding: 16px; font-size: .68rem; color: var(--text-muted);
+  border-top: 1px solid var(--border); margin-top: 8px;
+}
+
+/* ===================================================================
+   LOADER
+=================================================================== */
+.loading-overlay {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 999; gap: 16px; transition: opacity .4s ease;
+}
+.loading-overlay.hidden { opacity: 0; pointer-events: none; }
+.spinner {
+  width: 40px; height: 40px; border: 3px solid var(--border2);
+  border-top-color: var(--cyan); border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { font-size: .85rem; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loader">
+  <div class="spinner"></div>
+  <div class="loading-text">Initialising monitoring agents&hellip;</div>
+</div>
+
+<!-- ===== TOP BAR ===== -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="logo">
+      <svg class="logo-icon" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="30" height="30" rx="7" fill="#1e3a5f"/>
+        <path d="M5 20 L10 10 L15 16 L20 8 L25 14" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <circle cx="25" cy="14" r="2.5" fill="#06b6d4"/>
+      </svg>
+      <div>
+        <div class="logo-text">BankOps Monitor</div>
+        <div class="logo-sub">IT Operations Center</div>
+      </div>
+    </div>
+    <div id="overall-badge" class="critical">
+      <div class="pulse red" id="status-pulse"></div>
+      <span id="overall-text">CRITICAL</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div id="refresh-countdown">
+      <span id="countdown-text">30s</span>
+      <div id="countdown-bar"><div id="countdown-fill" style="width:100%"></div></div>
+    </div>
+    <button class="refresh-btn" onclick="refreshAll()">&#8635; Refresh Now</button>
+    <span style="font-size:.72rem; color:var(--text-muted)" id="last-refresh"></span>
+  </div>
+</header>
+
+<!-- ===== PAGE ===== -->
+<div class="page">
+
+  <!-- AGENT STATUS ROW -->
+  <div class="agent-row" id="agent-row">
+    <!-- Dynatrace -->
+    <div class="agent-card">
+      <div class="agent-header">
+        <span class="agent-name dynatrace">&#9685; Dynatrace</span>
+        <span class="agent-status"><div class="pulse green"></div> Active</span>
+      </div>
+      <div class="agent-metrics" id="dt-metrics">
+        <div class="agent-metric"><div class="agent-metric-label">Open Problems</div><div class="agent-metric-val bad" id="dt-problems">3</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">SLO Violations</div><div class="agent-metric-val bad" id="dt-slo-violations">2</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">Synth Failing</div><div class="agent-metric-val warn" id="dt-synth">2 / 4</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">DB Degraded</div><div class="agent-metric-val warn" id="dt-db">1</div></div>
+      </div>
+    </div>
+    <!-- Azure -->
+    <div class="agent-card">
+      <div class="agent-header">
+        <span class="agent-name azure">&#9632; Azure Monitor</span>
+        <span class="agent-status"><div class="pulse green"></div> Active</span>
+      </div>
+      <div class="agent-metrics" id="az-metrics">
+        <div class="agent-metric"><div class="agent-metric-label">Active Alerts</div><div class="agent-metric-val bad" id="az-alerts">4</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">AKS Degraded</div><div class="agent-metric-val bad" id="az-aks">1</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">Security Alerts</div><div class="agent-metric-val bad" id="az-security">2</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">Platform Incident</div><div class="agent-metric-val warn" id="az-platform">1</div></div>
+      </div>
+    </div>
+    <!-- Kibana -->
+    <div class="agent-card">
+      <div class="agent-header">
+        <span class="agent-name kibana">&#9670; Kibana / ELK</span>
+        <span class="agent-status"><div class="pulse green"></div> Active</span>
+      </div>
+      <div class="agent-metrics" id="kb-metrics">
+        <div class="agent-metric"><div class="agent-metric-label">Sec Events</div><div class="agent-metric-val bad" id="kb-sec">3</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">Top Error Rate</div><div class="agent-metric-val bad" id="kb-err">4.70%</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">TXN Fail Rate</div><div class="agent-metric-val bad" id="kb-txn">3.29%</div></div>
+        <div class="agent-metric"><div class="agent-metric-label">Rule Failures</div><div class="agent-metric-val warn" id="kb-rules">1</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATS BAR -->
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-card">
+      <div class="stat-icon red">&#9888;</div>
+      <div><div class="stat-label">Critical Alerts</div><div class="stat-val red" id="stat-critical">--</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon orange">&#9650;</div>
+      <div><div class="stat-label">High Alerts</div><div class="stat-val orange" id="stat-high">--</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon yellow">&#9670;</div>
+      <div><div class="stat-label">Warning Alerts</div><div class="stat-val yellow" id="stat-warning">--</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon red">&#9135;</div>
+      <div><div class="stat-label">SLO Violations</div><div class="stat-val red" id="stat-slo">--</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">&#9654;</div>
+      <div><div class="stat-label">Healthy Services</div><div class="stat-val green" id="stat-healthy">--</div></div>
+    </div>
+  </div>
+
+  <!-- SERVICE HEALTH GRID -->
+  <div>
+    <div class="section-title">Service Health</div>
+    <div class="service-grid" id="service-grid"></div>
+  </div>
+
+  <!-- MAIN ROW: Charts + Alerts -->
+  <div class="main-row">
+    <div class="charts-col">
+      <!-- Error rate trend -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <div><div class="chart-title">Error Rate Trend</div><div class="chart-sub">Last 60 minutes, sampled every 5 min</div></div>
+        </div>
+        <div class="chart-wrap" style="height:180px"><canvas id="chartErrorRate"></canvas></div>
+      </div>
+      <!-- Two charts side by side -->
+      <div class="charts-pair">
+        <div class="chart-card">
+          <div class="chart-header"><div><div class="chart-title">Response Time (p90)</div><div class="chart-sub">Milliseconds per service</div></div></div>
+          <div class="chart-wrap" style="height:175px"><canvas id="chartResponseTime"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header"><div><div class="chart-title">Transaction Volume</div><div class="chart-sub">Requests / min by type</div></div></div>
+          <div class="chart-wrap" style="height:175px"><canvas id="chartTxnVolume"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alerts Feed -->
+    <div class="alerts-col">
+      <div class="alerts-card">
+        <div class="alerts-header">
+          <div class="alerts-title">Active Alerts</div>
+          <div class="badge-counts">
+            <span class="bc crit" id="ac-crit">--</span>
+            <span class="bc high" id="ac-high">--</span>
+            <span class="bc warn" id="ac-warn">--</span>
+          </div>
+        </div>
+        <div class="alert-list" id="alert-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLO STATUS -->
+  <div>
+    <div class="section-title">SLO Status</div>
+    <div class="slo-card">
+      <table class="slo-table" id="slo-table">
+        <thead><tr><th>SLO</th><th>Target</th><th>Current</th><th>Error Budget</th><th>Burn Rate</th><th>Status</th></tr></thead>
+        <tbody id="slo-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- INFRA HEATMAP -->
+  <div>
+    <div class="section-title">Infrastructure Host Health</div>
+    <div class="infra-grid" id="infra-grid"></div>
+  </div>
+
+  <!-- ORCHESTRATOR PANEL -->
+  <div>
+    <div class="section-title">Orchestrator &mdash; Unified Incident Report</div>
+    <div class="orc-panel" id="orc-panel">
+      <div class="orc-header">
+        <div class="orc-title">Active Incidents</div>
+        <div class="escalation-badge" id="esc-badge"><div class="pulse red"></div> P1 ESCALATION REQUIRED</div>
+      </div>
+      <div class="incidents-grid" id="incidents-grid"></div>
+      <div class="section-title" style="margin-top:12px">Immediate Actions</div>
+      <table class="actions-table" id="actions-table">
+        <thead><tr><th>#</th><th>Team</th><th>Urgency</th><th>Action</th></tr></thead>
+        <tbody id="actions-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<footer class="footer">
+  Bank IT Operations &mdash; Multi-Agent Monitoring System &bull;
+  Dynatrace + Azure Monitor + Kibana &bull; Powered by Claude claude-opus-4-6
+</footer>
+
+<!-- ===================================================================
+     JAVASCRIPT
+=================================================================== -->
+<script>
+// ----------------------------------------------------------------
+// Config
+// ----------------------------------------------------------------
+const REFRESH_SEC = 30;
+let countdown = REFRESH_SEC;
+let countdownTimer = null;
+let charts = {};
+
+// ----------------------------------------------------------------
+// Fetch helpers
+// ----------------------------------------------------------------
+async function get(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+// ----------------------------------------------------------------
+// Chart defaults
+// ----------------------------------------------------------------
+Chart.defaults.color = '#64748b';
+Chart.defaults.borderColor = '#1e2d45';
+Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+Chart.defaults.font.size = 11;
+
+function makeLineChart(id, labels, datasets) {
+  const ctx = document.getElementById(id).getContext('2d');
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: datasets.map(d => ({
+        label: d.label, data: d.data,
+        borderColor: d.color, backgroundColor: d.color + '22',
+        borderWidth: 2, pointRadius: 2.5, pointHoverRadius: 5,
+        tension: 0.35, fill: false,
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 600 },
+      plugins: {
+        legend: { position: 'bottom', labels: { padding: 10, boxWidth: 10, font: { size: 10 } } },
+        tooltip: { mode: 'index', intersect: false }
+      },
+      scales: {
+        x: { grid: { color: '#1e2d45' }, ticks: { maxTicksLimit: 8 } },
+        y: { grid: { color: '#1e2d45' }, min: 0 }
+      }
+    }
+  });
+}
+
+function makeBarChart(id, labels, datasets) {
+  const ctx = document.getElementById(id).getContext('2d');
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: datasets.map(d => ({
+        label: d.label, data: d.data,
+        backgroundColor: d.color + 'cc', borderColor: d.color,
+        borderWidth: 1, borderRadius: 3,
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 600 },
+      plugins: { legend: { position: 'bottom', labels: { padding: 10, boxWidth: 10, font: { size: 10 } } } },
+      scales: {
+        x: { grid: { color: '#1e2d45' }, ticks: { font: { size: 9 } } },
+        y: { grid: { color: '#1e2d45' }, min: 0 }
+      }
+    }
+  });
+}
+
+// ----------------------------------------------------------------
+// Render helpers
+// ----------------------------------------------------------------
+const statusColor = { critical: '#ef4444', high: '#f97316', warning: '#eab308', healthy: '#22c55e', ok: '#22c55e', violated: '#ef4444', medium: '#eab308' };
+const urgencyClass = { 'NOW': 'NOW', '15min': 'min15', '1h': 'h1', '4h': 'h4' };
+
+function statusBadge(s) {
+  return `<span class="status-pill ${s}">${s.toUpperCase()}</span>`;
+}
+
+function renderServices(data) {
+  const grid = document.getElementById('service-grid');
+  grid.innerHTML = data.services.map(s => {
+    const errClass = s.error_rate > 2 ? 'bad' : s.error_rate > 0.5 ? 'warn' : 'ok';
+    const rtClass  = s.p90_ms > 1000 ? 'bad' : s.p90_ms > 500 ? 'warn' : 'ok';
+    const avClass  = s.availability < 99 ? 'bad' : s.availability < 99.9 ? 'warn' : 'ok';
+    return `<div class="svc-card ${s.status}">
+      <div class="svc-name">${s.name}</div>
+      <div class="svc-row"><span class="svc-lbl">Error Rate</span><span class="svc-val ${errClass}">${s.error_rate.toFixed(2)}%</span></div>
+      <div class="svc-row"><span class="svc-lbl">p90</span><span class="svc-val ${rtClass}">${s.p90_ms.toFixed(0)}ms</span></div>
+      <div class="svc-row"><span class="svc-lbl">Avail.</span><span class="svc-val ${avClass}">${s.availability.toFixed(2)}%</span></div>
+      <span class="svc-badge ${s.status}">${s.status}</span>
+    </div>`;
+  }).join('');
+
+  // Overall badge
+  const badge = document.getElementById('overall-badge');
+  const pulse = document.getElementById('status-pulse');
+  const text  = document.getElementById('overall-text');
+  badge.className = data.overall;
+  pulse.className = 'pulse ' + { critical:'red', high:'orange', warning:'yellow', healthy:'green' }[data.overall];
+  text.textContent = data.overall.toUpperCase();
+
+  // Stats bar
+  document.getElementById('stat-critical').textContent = data.summary.critical;
+  document.getElementById('stat-warning').textContent  = data.summary.warning;
+  document.getElementById('stat-healthy').textContent  = data.summary.healthy;
+}
+
+function renderAlerts(data) {
+  document.getElementById('ac-crit').textContent = data.counts.critical + ' CRIT';
+  document.getElementById('ac-high').textContent = data.counts.high + ' HIGH';
+  document.getElementById('ac-warn').textContent = data.counts.warning + ' WARN';
+  document.getElementById('stat-high').textContent = data.counts.high;
+
+  const list = document.getElementById('alert-list');
+  list.innerHTML = data.alerts.map(a => {
+    const corr = a.correlated.length > 0
+      ? a.correlated.map(c => `<span class="corr-badge">${c}</span>`).join('')
+      : '';
+    return `<div class="alert-item ${a.severity}">
+      <div class="alert-top">
+        <div class="alert-title-text">${a.title}</div>
+        <div class="alert-age">${a.age_min}m ago</div>
+      </div>
+      <div class="alert-meta">
+        <span class="alert-source ${a.source}">${a.source}</span>
+        <span class="alert-category">${a.category}</span>
+        ${corr}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderSLOs(data) {
+  document.getElementById('stat-slo').textContent = data.slos.filter(s => s.status === 'violated').length;
+  const tbody = document.getElementById('slo-tbody');
+  tbody.innerHTML = data.slos.map(s => {
+    const budgetPct = Math.max(0, Math.min(100, s.budget_pct));
+    const barColor  = s.status === 'ok' ? '#22c55e' : s.status === 'warning' ? '#eab308' : '#ef4444';
+    const burnClass = s.burn_rate > 3 ? 'style="color:var(--red)"' : s.burn_rate > 1.5 ? 'style="color:var(--yellow)"' : '';
+    return `<tr>
+      <td>${s.name}</td>
+      <td>${s.target}%</td>
+      <td style="color:${statusColor[s.status] || '#fff'};font-weight:700">${s.current.toFixed(3)}%</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="slo-bar-wrap"><div class="slo-bar" style="width:${Math.abs(budgetPct)}%;background:${barColor}"></div></div>
+          <span style="font-size:.7rem;color:${s.budget_pct < 0 ? 'var(--red)' : 'var(--text-dim)'}">${s.budget_pct.toFixed(1)}%</span>
+        </div>
+      </td>
+      <td ${burnClass}>${s.burn_rate.toFixed(2)}x</td>
+      <td>${statusBadge(s.status)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderInfra(data) {
+  const grid = document.getElementById('infra-grid');
+  grid.innerHTML = data.hosts.map(h => {
+    const cpuColor = h.cpu > 85 ? '#ef4444' : h.cpu > 70 ? '#f97316' : '#22c55e';
+    const memColor = h.memory > 85 ? '#ef4444' : h.memory > 70 ? '#eab308' : '#22c55e';
+    return `<div class="host-card">
+      <div class="host-name" title="${h.name}">${h.name}</div>
+      <div class="metric-bar-row">
+        <div class="metric-bar-label"><span>CPU</span><span style="color:${cpuColor};font-weight:700">${h.cpu.toFixed(1)}%</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${h.cpu}%;background:${cpuColor}"></div></div>
+      </div>
+      <div class="metric-bar-row">
+        <div class="metric-bar-label"><span>Memory</span><span style="color:${memColor};font-weight:700">${h.memory.toFixed(1)}%</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${h.memory}%;background:${memColor}"></div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderOrchestrator(data) {
+  const esc = document.getElementById('esc-badge');
+  esc.style.display = data.escalation_required ? 'flex' : 'none';
+
+  const sevSourceColor = { Dynatrace: '#06b6d4', Azure: '#5a9fd4', Kibana: '#a855f7' };
+  const grid = document.getElementById('incidents-grid');
+  grid.innerHTML = data.incidents.map(inc => `
+    <div class="inc-card ${inc.severity}">
+      <div class="inc-header">
+        <span class="inc-id">${inc.id}</span>
+        <span class="sev-chip ${inc.severity}">${inc.severity}</span>
+      </div>
+      <div class="inc-title">${inc.title}</div>
+      <div class="inc-cause">${inc.root_cause}</div>
+      <div class="inc-impact" style="font-size:.67rem;color:var(--text-muted)">${inc.impact}</div>
+      <div class="inc-footer">
+        <span class="inc-owner">${inc.owner}</span>
+        <div class="inc-sources">
+          ${inc.sources.map(s => `<div class="inc-src-dot" style="background:${sevSourceColor[s]||'#fff'}" title="${s}"></div>`).join('')}
+        </div>
+      </div>
+    </div>`).join('');
+
+  const tbody = document.getElementById('actions-tbody');
+  tbody.innerHTML = data.immediate_actions.map(a => {
+    const uc = urgencyClass[a.urgency] || 'h4';
+    return `<tr>
+      <td style="color:var(--text-muted);font-weight:700;width:24px">${a.priority}</td>
+      <td style="color:var(--cyan);white-space:nowrap">${a.team}</td>
+      <td><span class="urgency ${uc}">${a.urgency}</span></td>
+      <td>${a.action}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderChartErrorRate(data) {
+  makeLineChart('chartErrorRate', data.labels, data.datasets);
+}
+
+function renderChartResponseTime(data) {
+  const labels = data.services.map(s => s.service.replace('payment-gateway','pay-gw').replace('core-banking-api','core-bank').replace('authentication-service','auth').replace('transaction-processor','txn-proc'));
+  makeBarChart('chartResponseTime', labels, [
+    { label: 'p50', data: data.services.map(s => s.p50_ms),  color: '#22c55e' },
+    { label: 'p90', data: data.services.map(s => s.p90_ms),  color: '#eab308' },
+    { label: 'p99', data: data.services.map(s => s.p99_ms),  color: '#ef4444' },
+  ]);
+}
+
+function renderChartTxnVolume(data) {
+  makeLineChart('chartTxnVolume', data.labels, data.datasets);
+}
+
+// ----------------------------------------------------------------
+// Full data refresh
+// ----------------------------------------------------------------
+async function refreshAll() {
+  try {
+    const [services, alerts, slos, infra, errChart, rtChart, txnChart, orc] = await Promise.all([
+      get('/api/services'),
+      get('/api/alerts'),
+      get('/api/slos'),
+      get('/api/charts/infrastructure'),
+      get('/api/charts/error-rates'),
+      get('/api/charts/response-times'),
+      get('/api/charts/transaction-volume'),
+      get('/api/orchestrator'),
+    ]);
+
+    renderServices(services);
+    renderAlerts(alerts);
+    renderSLOs(slos);
+    renderInfra(infra);
+    renderChartErrorRate(errChart);
+    renderChartResponseTime(rtChart);
+    renderChartTxnVolume(txnChart);
+    renderOrchestrator(orc);
+
+    const now = new Date();
+    document.getElementById('last-refresh').textContent =
+      'Updated ' + now.toTimeString().slice(0,8);
+  } catch(e) {
+    console.error('Refresh error:', e);
+  }
+}
+
+// ----------------------------------------------------------------
+// Countdown timer
+// ----------------------------------------------------------------
+function startCountdown() {
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdown = REFRESH_SEC;
+  countdownTimer = setInterval(() => {
+    countdown--;
+    document.getElementById('countdown-text').textContent = countdown + 's';
+    document.getElementById('countdown-fill').style.width = (countdown / REFRESH_SEC * 100) + '%';
+    if (countdown <= 0) {
+      refreshAll();
+      countdown = REFRESH_SEC;
+    }
+  }, 1000);
+}
+
+// ----------------------------------------------------------------
+// Init
+// ----------------------------------------------------------------
+window.addEventListener('DOMContentLoaded', async () => {
+  await refreshAll();
+  document.getElementById('loader').classList.add('hidden');
+  startCountdown();
+});
+</script>
+</body>
+</html>
